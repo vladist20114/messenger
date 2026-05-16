@@ -1,11 +1,13 @@
-import socket, hashlib, json, os, requests
+import socket, hashlib, json, os
+import urllib.request
+import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from datetime import datetime
 
+# ========== ТВОИ ДАННЫЕ ОТ SUPABASE ==========
 SUPABASE_URL = "https://soylynaasbgiafsmzlf.supabase.co"
 SUPABASE_KEY = "sb_publishable_6MR2TYIq1LGB1MYwRMZJ_A_n5Z4eLhU"
-
 def supabase_request(endpoint, method="GET", data=None):
     url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
