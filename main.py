@@ -5,7 +5,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from datetime import datetime
 
-SUPABASE_URL = "https://soylynaasbgiafsmzlf.supabase.co"
+SUPABASE_URL = "https://soylynqasbgifasmzlf.supabase.co"
 SUPABASE_KEY = "sb_publishable_6MR2TYIq1LGB1MYwRMZJ_A_n5Z4eLhU"
 
 def supabase_request(endpoint, method="GET", data=None):
