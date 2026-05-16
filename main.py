@@ -5,19 +5,30 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from datetime import datetime
 
-# ========== ТВОИ ДАННЫЕ ОТ SUPABASE ==========
 SUPABASE_URL = "https://soylynaasbgiafsmzlf.supabase.co"
 SUPABASE_KEY = "sb_publishable_6MR2TYIq1LGB1MYwRMZJ_A_n5Z4eLhU"
+
 def supabase_request(endpoint, method="GET", data=None):
     url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
-    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json"
+    }
     if method == "GET":
-        resp = requests.get(url, headers=headers)
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req) as response:
+            return json.loads(response.read().decode())
     elif method == "POST":
-        resp = requests.post(url, headers=headers, json=data)
+        json_data = json.dumps(data).encode()
+        req = urllib.request.Request(url, data=json_data, headers=headers, method="POST")
+        with urllib.request.urlopen(req) as response:
+            return json.loads(response.read().decode())
     elif method == "DELETE":
-        resp = requests.delete(url, headers=headers)
-    return resp.json() if resp.status_code < 400 else []
+        req = urllib.request.Request(url, headers=headers, method="DELETE")
+        with urllib.request.urlopen(req) as response:
+            return json.loads(response.read().decode())
+    return []
 
 def get_user_by_email(email):
     users = supabase_request(f"users?email=eq.{email}", "GET")
@@ -122,15 +133,22 @@ class Handler(BaseHTTPRequestHandler):
     
     def page_explore(self, user):
         q = parse_qs(urlparse(self.path).query).get('q', [''])[0]
-        users = supabase_request(f"users?username=ilike.*{q}*&id=neq.{user[0]}&order=id.desc", "GET") if q else supabase_request(f"users?id=neq.{user[0]}&order=id.desc", "GET")
-        html = ''.join([f'<a href="/profile/{u["id"]}" style="text-decoration:none"><div class="card" style="display:flex;align-items:center"><div class="avatar">{u["username"][0].upper()}</div><b>{u["username"]}</b></div></a>' for u in users[:30]])
+        if q:
+            users = supabase_request(f"users?username=ilike.*{q}*&id=neq.{user[0]}", "GET")
+        else:
+            users = supabase_request(f"users?id=neq.{user[0]}&order=id.desc", "GET")
+        html = ''
+        for u in users[:30]:
+            html += f'<a href="/profile/{u["id"]}" style="text-decoration:none;color:var(--text)"><div class="card" style="display:flex;align-items:center"><div class="avatar">{u["username"][0].upper()}</div><b>{u["username"]}</b></div></a>'
         self.send(f'<!DOCTYPE html><html><head><title>Поиск</title>{CSS}</head><body>{self.navbar(user, "🔍 Поиск")}<div class="container"><div class="search-box"><form><input name="q" placeholder="Поиск..." value="{q}"></form></div>{html or "<p>Никого не найдено</p>"}</div></body></html>')
     
     def page_profile(self, uid, current_user):
         u = get_user_by_id(int(uid))
         if not u: self.send_error(404); return
         posts = supabase_request(f"posts?user_id=eq.{uid}&order=id.desc", "GET")
-        html = ''.join([f'<div class="card"><div>{p["content"]}</div><div class="time">{p["date"]}</div></div>' for p in posts])
+        html = ''
+        for p in posts:
+            html += f'<div class="card"><div>{p["content"]}</div><div class="time">{p["date"]}</div></div>'
         self.send(f'<!DOCTYPE html><html><head><title>{u["username"]}</title>{CSS}</head><body>{self.navbar(current_user, "👤 Профиль")}<div class="container"><div class="card" style="text-align:center"><div class="avatar" style="width:80px;height:80px;font-size:32px;margin:0 auto">{u["username"][0].upper()}</div><h2>@{u["username"]}</h2><a href="/chat/{u["id"]}" class="btn">💬 Написать</a></div>{html}</div></body></html>')
     
     def page_messages(self, user):
@@ -138,11 +156,13 @@ class Handler(BaseHTTPRequestHandler):
         chat_users = {}
         for m in all_msgs:
             other = m['from_id'] if m['to_id'] == user[0] else m['to_id']
-            if other not in chat_users: chat_users[other] = m
+            if other not in chat_users:
+                chat_users[other] = m
         html = ''
         for uid, last in chat_users.items():
             u = get_user_by_id(uid)
-            if u: html += f'<a href="/chat/{u["id"]}" style="text-decoration:none;color:var(--text)"><div style="display:flex;align-items:center;padding:14px;border-bottom:1px solid #2a2a2a"><div class="avatar">{u["username"][0].upper()}</div><div><b>{u["username"]}</b><p style="color:gray;font-size:13px">{last["text"][:40]}</p></div></div></a>'
+            if u:
+                html += f'<a href="/chat/{u["id"]}" style="text-decoration:none;color:var(--text)"><div style="display:flex;align-items:center;padding:14px;border-bottom:1px solid #2a2a2a"><div class="avatar">{u["username"][0].upper()}</div><div><b>{u["username"]}</b><p style="color:gray;font-size:13px">{last["text"][:40]}</p></div></div></a>'
         self.send(f'<!DOCTYPE html><html><head><title>Чаты</title>{CSS}</head><body>{self.navbar(user, "💬 Чаты")}<div class="container"><div class="card">{html or "<p>Нет сообщений</p>"}</div></div></body></html>')
     
     def page_chat(self, user, uid):
@@ -161,7 +181,9 @@ class Handler(BaseHTTPRequestHandler):
     
     def register(self, data):
         u, e, p = data['username'][0], data['email'][0], hashlib.sha256(data['password'][0].encode()).hexdigest()
-        if get_user_by_email(e) or get_user_by_username(u): self.redirect('/register'); return
+        if get_user_by_email(e) or get_user_by_username(u):
+            self.redirect('/register')
+            return
         create_user(u, e, p)
         self.redirect('/login')
     
@@ -175,7 +197,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Set-Cookie', f'session={sid}; Path=/')
             self.send_header('Location', '/')
             self.end_headers()
-        else: self.redirect('/login')
+        else:
+            self.redirect('/login')
     
     def logout(self):
         self.send_response(302)
@@ -186,7 +209,9 @@ class Handler(BaseHTTPRequestHandler):
     def create_post(self, data):
         user = self.get_user()
         if not user: return
-        create_post(user[0], data.get('content', [''])[0], data.get('image', [''])[0])
+        content = data.get('content', [''])[0]
+        image = data.get('image', [''])[0]
+        create_post(user[0], content, image)
         self.redirect('/')
     
     def like(self, data):
@@ -198,7 +223,8 @@ class Handler(BaseHTTPRequestHandler):
     def send_message(self, data):
         user = self.get_user()
         if not user: return
-        send_message(user[0], int(data['to'][0]), data['text'][0])
+        to, text = int(data['to'][0]), data['text'][0]
+        send_message(user[0], to, text)
         self.send_json()
     
     def send(self, html):
