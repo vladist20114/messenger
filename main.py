@@ -1,74 +1,15 @@
 import socket, hashlib, json, os
-import urllib.request
-import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from datetime import datetime
 
-# ========== ТВОИ ДАННЫЕ ОТ SUPABASE (ПРОВЕРЬ ПРАВИЛЬНОСТЬ!) ==========
-SUPABASE_URL = "https://soylynqasbgifasmzlf.supabase.co"
-SUPABASE_KEY = "sb_publishable_6MR2TYItq1LGB1MYwRMZjA_n5Z4eLhU"
-
-def supabase_request(endpoint, method="GET", data=None):
-    url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json"
-    }
-    if method == "GET":
-        req = urllib.request.Request(url, headers=headers, method="GET")
-        with urllib.request.urlopen(req) as response:
-            return json.loads(response.read().decode())
-    elif method == "POST":
-        json_data = json.dumps(data).encode()
-        req = urllib.request.Request(url, data=json_data, headers=headers, method="POST")
-        with urllib.request.urlopen(req) as response:
-            return json.loads(response.read().decode())
-    elif method == "DELETE":
-        req = urllib.request.Request(url, headers=headers, method="DELETE")
-        with urllib.request.urlopen(req) as response:
-            return json.loads(response.read().decode())
-    return []
-
-def get_user_by_email(email):
-    users = supabase_request(f"users?email=eq.{email}", "GET")
-    return users[0] if users else None
-
-def get_user_by_id(uid):
-    users = supabase_request(f"users?id=eq.{uid}", "GET")
-    return users[0] if users else None
-
-def get_user_by_username(username):
-    users = supabase_request(f"users?username=eq.{username}", "GET")
-    return users[0] if users else None
-
-def create_user(username, email, password_hash):
-    data = {"username": username, "email": email, "password": password_hash, "avatar": ""}
-    return supabase_request("users", "POST", data)
-
-def get_posts():
-    return supabase_request("posts?select=*&order=id.desc", "GET")
-
-def create_post(user_id, content, image):
-    data = {"user_id": user_id, "content": content, "image": image, "date": datetime.now().strftime('%d.%m.%Y %H:%M')}
-    return supabase_request("posts", "POST", data)
-
-def send_message(from_id, to_id, text):
-    data = {"from_id": from_id, "to_id": to_id, "text": text, "date": datetime.now().strftime('%d.%m.%Y %H:%M')}
-    return supabase_request("messages", "POST", data)
-
-def like_post(user_id, post_id):
-    existing = supabase_request(f"likes?user_id=eq.{user_id}&post_id=eq.{post_id}", "GET")
-    if existing:
-        supabase_request(f"likes?id=eq.{existing[0]['id']}", "DELETE")
-    else:
-        supabase_request("likes", "POST", {"user_id": user_id, "post_id": post_id})
-
-def is_liked(user_id, post_id):
-    return len(supabase_request(f"likes?user_id=eq.{user_id}&post_id=eq.{post_id}", "GET")) > 0
-
+# Простое хранилище в памяти
+users = {}
+posts = []
+messages = []
+likes = []
 sessions = {}
+next_id = 1
 
 CSS = '''<style>
 :root{--bg:#0a0a0a;--card:#1a1a1a;--text:#fff;--gray:#888;--accent:#6c5ce7;--accent2:#a855f7}
@@ -99,7 +40,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == '/logout': self.logout()
         elif path == '/messages' and user: self.page_messages(user)
         elif path.startswith('/chat/') and user: self.page_chat(user, path.split('/')[-1])
-        elif path.startswith('/profile/'): self.page_profile(path.split('/')[-1], user)
+        elif path.startswith('/profile/') and user: self.page_profile(path.split('/')[-1], user)
         elif path == '/explore' and user: self.page_explore(user)
     
     def do_POST(self):
@@ -123,55 +64,48 @@ class Handler(BaseHTTPRequestHandler):
         return f'<nav class="navbar"><span class="logo">{title}</span><div><a href="/">Главная</a><a href="/explore">Поиск</a><a href="/messages">Чаты</a><a href="/profile/{user[0]}">Профиль</a><a href="/logout" class="btn" style="padding:6px 16px">Выйти</a></div></nav>'
     
     def home(self, user):
-        posts = get_posts()
         html = ''
-        for p in posts:
-            author = get_user_by_id(p['user_id'])
+        for p in posts[::-1]:
+            author = users.get(str(p['user_id']), {})
             if not author: continue
-            likes_count = len(supabase_request(f"likes?post_id=eq.{p['id']}", "GET"))
-            html += f'<div class="card"><div class="post-header"><a href="/profile/{author["id"]}" style="display:flex;align-items:center;text-decoration:none;color:var(--text)"><div class="avatar">{author["username"][0].upper()}</div><div><b>{author["username"]}</b><div class="time">{p["date"]}</div></div></a></div><div>{p["content"]}</div><button class="btn" style="margin-top:10px" onclick="like({p["id"]})">{"❤️" if is_liked(user[0], p["id"]) else "🤍"} {likes_count}</button></div>'
+            is_liked = any(l['user_id'] == user[0] and l['post_id'] == p['id'] for l in likes)
+            likes_count = sum(1 for l in likes if l['post_id'] == p['id'])
+            html += f'<div class="card"><div class="post-header"><a href="/profile/{p["user_id"]}" style="display:flex;align-items:center;text-decoration:none;color:var(--text)"><div class="avatar">{author["username"][0].upper()}</div><div><b>{author["username"]}</b><div class="time">{p["date"]}</div></div></a></div><div>{p["content"]}</div><button class="btn" style="margin-top:10px" onclick="like({p["id"]})">{"❤️" if is_liked else "🤍"} {likes_count}</button></div>'
         self.send(f'<!DOCTYPE html><html><head><title>Messenger</title>{CSS}</head><body>{self.navbar(user)}<div class="container"><div class="card"><form method="POST" action="/post"><textarea name="content" placeholder="Что нового?" rows="3"></textarea><input name="image" placeholder="Ссылка на фото"><button class="btn" style="width:100%">Опубликовать</button></form></div>{html}</div><script>async function like(id){{await fetch("/like",{{method:"POST",body:new URLSearchParams({{post_id:id}})}});location.reload()}}</script></body></html>')
     
     def page_explore(self, user):
-        q = parse_qs(urlparse(self.path).query).get('q', [''])[0]
-        if q:
-            users = supabase_request(f"users?username=ilike.*{q}*&id=neq.{user[0]}", "GET")
-        else:
-            users = supabase_request(f"users?id=neq.{user[0]}&order=id.desc", "GET")
         html = ''
-        for u in users[:30]:
-            html += f'<a href="/profile/{u["id"]}" style="text-decoration:none;color:var(--text)"><div class="card" style="display:flex;align-items:center"><div class="avatar">{u["username"][0].upper()}</div><b>{u["username"]}</b></div></a>'
-        self.send(f'<!DOCTYPE html><html><head><title>Поиск</title>{CSS}</head><body>{self.navbar(user, "🔍 Поиск")}<div class="container"><div class="search-box"><form><input name="q" placeholder="Поиск..." value="{q}"></form></div>{html or "<p>Никого не найдено</p>"}</div></body></html>')
+        for uid, u in users.items():
+            if int(uid) != user[0]:
+                html += f'<a href="/profile/{uid}" style="text-decoration:none;color:var(--text)"><div class="card" style="display:flex;align-items:center"><div class="avatar">{u["username"][0].upper()}</div><b>{u["username"]}</b></div></a>'
+        self.send(f'<!DOCTYPE html><html><head><title>Поиск</title>{CSS}</head><body>{self.navbar(user, "🔍 Поиск")}<div class="container">{html or "<p>Никого не найдено</p>"}</div></body></html>')
     
     def page_profile(self, uid, current_user):
-        u = get_user_by_id(int(uid))
+        u = users.get(uid)
         if not u: self.send_error(404); return
-        posts = supabase_request(f"posts?user_id=eq.{uid}&order=id.desc", "GET")
-        html = ''
-        for p in posts:
-            html += f'<div class="card"><div>{p["content"]}</div><div class="time">{p["date"]}</div></div>'
-        self.send(f'<!DOCTYPE html><html><head><title>{u["username"]}</title>{CSS}</head><body>{self.navbar(current_user, "👤 Профиль")}<div class="container"><div class="card" style="text-align:center"><div class="avatar" style="width:80px;height:80px;font-size:32px;margin:0 auto">{u["username"][0].upper()}</div><h2>@{u["username"]}</h2><a href="/chat/{u["id"]}" class="btn">💬 Написать</a></div>{html}</div></body></html>')
+        user_posts = [p for p in posts if p['user_id'] == int(uid)]
+        html = ''.join([f'<div class="card"><div>{p["content"]}</div><div class="time">{p["date"]}</div></div>' for p in user_posts])
+        self.send(f'<!DOCTYPE html><html><head><title>{u["username"]}</title>{CSS}</head><body>{self.navbar(current_user, "👤 Профиль")}<div class="container"><div class="card" style="text-align:center"><div class="avatar" style="width:80px;height:80px;font-size:32px;margin:0 auto">{u["username"][0].upper()}</div><h2>@{u["username"]}</h2><a href="/chat/{uid}" class="btn">💬 Написать</a></div>{html}</div></body></html>')
     
     def page_messages(self, user):
-        all_msgs = supabase_request(f"messages?or=(from_id.eq.{user[0]},to_id.eq.{user[0]})&order=id.desc", "GET")
-        chat_users = {}
-        for m in all_msgs:
-            other = m['from_id'] if m['to_id'] == user[0] else m['to_id']
-            if other not in chat_users:
-                chat_users[other] = m
+        chat_users = set()
+        for m in messages:
+            if m['from_id'] == user[0]: chat_users.add(m['to_id'])
+            if m['to_id'] == user[0]: chat_users.add(m['from_id'])
         html = ''
-        for uid, last in chat_users.items():
-            u = get_user_by_id(uid)
+        for uid in chat_users:
+            u = users.get(str(uid))
             if u:
-                html += f'<a href="/chat/{u["id"]}" style="text-decoration:none;color:var(--text)"><div style="display:flex;align-items:center;padding:14px;border-bottom:1px solid #2a2a2a"><div class="avatar">{u["username"][0].upper()}</div><div><b>{u["username"]}</b><p style="color:gray;font-size:13px">{last["text"][:40]}</p></div></div></a>'
+                last_msg = [m for m in messages if (m['from_id']==user[0] and m['to_id']==uid) or (m['from_id']==uid and m['to_id']==user[0])]
+                last_text = last_msg[-1]['text'][:40] if last_msg else ''
+                html += f'<a href="/chat/{uid}" style="text-decoration:none;color:var(--text)"><div style="display:flex;align-items:center;padding:14px;border-bottom:1px solid #2a2a2a"><div class="avatar">{u["username"][0].upper()}</div><div><b>{u["username"]}</b><p style="color:gray;font-size:13px">{last_text}</p></div></div></a>'
         self.send(f'<!DOCTYPE html><html><head><title>Чаты</title>{CSS}</head><body>{self.navbar(user, "💬 Чаты")}<div class="container"><div class="card">{html or "<p>Нет сообщений</p>"}</div></div></body></html>')
     
     def page_chat(self, user, uid):
-        other = get_user_by_id(int(uid))
+        other = users.get(uid)
         if not other: self.send_error(404); return
-        msgs = supabase_request(f"messages?or=(from_id.eq.{user[0]},to_id.eq.{user[0]})&order=id.asc", "GET")
-        msgs = [m for m in msgs if (m['from_id'] == int(uid) and m['to_id'] == user[0]) or (m['from_id'] == user[0] and m['to_id'] == int(uid))]
-        html = ''.join([f'<div class="msg {"sent" if m["from_id"]==user[0] else "received"}">{m["text"]}<div style="font-size:10px;opacity:0.6">{m["date"]}</div></div>' for m in msgs])
+        chat_msgs = [m for m in messages if (m['from_id']==user[0] and m['to_id']==int(uid)) or (m['from_id']==int(uid) and m['to_id']==user[0])]
+        html = ''.join([f'<div class="msg {"sent" if m["from_id"]==user[0] else "received"}">{m["text"]}<div style="font-size:10px;opacity:0.6">{m["date"]}</div></div>' for m in chat_msgs])
         self.send(f'<!DOCTYPE html><html><head><title>Чат</title>{CSS}</head><body><nav class="navbar"><span class="logo">💬 {other["username"]}</span><div><a href="/profile/{uid}">Профиль</a><a href="/messages">Назад</a></div></nav><div class="container"><div class="card"><div class="chat-box" id="msgs">{html}</div><div style="display:flex;gap:8px"><input id="inp" placeholder="Сообщение..." onkeypress="if(event.key===\'Enter\')send()" style="flex:1"><button class="btn" onclick="send()">➤</button></div></div></div><script>document.getElementById("msgs").scrollTop=99999;async function send(){{let v=document.getElementById("inp").value;if(v){{await fetch("/message",{{method:"POST",body:new URLSearchParams({{to:"{uid}",text:v}})}});location.reload()}}}}</script></body></html>')
     
     def page_register(self):
@@ -181,25 +115,32 @@ class Handler(BaseHTTPRequestHandler):
         self.send(f'<!DOCTYPE html><html><head><title>Вход</title>{CSS}</head><body><div class="container"><div class="card"><h1 class="logo">📱 Messenger</h1><form method="POST"><input name="email" type="email" placeholder="Email" required><input name="password" type="password" placeholder="Пароль" required><button class="btn" style="width:100%">Войти</button></form><p>Нет аккаунта? <a href="/register">Регистрация</a></p></div></div></body></html>')
     
     def register(self, data):
-        u, e, p = data['username'][0], data['email'][0], hashlib.sha256(data['password'][0].encode()).hexdigest()
-        if get_user_by_email(e) or get_user_by_username(u):
-            self.redirect('/register')
-            return
-        create_user(u, e, p)
+        global next_id
+        username = data['username'][0]
+        email = data['email'][0]
+        password = hashlib.sha256(data['password'][0].encode()).hexdigest()
+        for u in users.values():
+            if u['email'] == email or u['username'] == username:
+                self.redirect('/register')
+                return
+        user_id = next_id
+        next_id += 1
+        users[str(user_id)] = {'id': user_id, 'username': username, 'email': email, 'password': password, 'avatar': ''}
         self.redirect('/login')
     
     def login(self, data):
-        e, p = data['email'][0], hashlib.sha256(data['password'][0].encode()).hexdigest()
-        user = get_user_by_email(e)
-        if user and user['password'] == p:
-            sid = hashlib.sha256(os.urandom(32)).hexdigest()
-            sessions[sid] = (user['id'], user['username'], user['email'])
-            self.send_response(302)
-            self.send_header('Set-Cookie', f'session={sid}; Path=/')
-            self.send_header('Location', '/')
-            self.end_headers()
-        else:
-            self.redirect('/login')
+        email = data['email'][0]
+        password = hashlib.sha256(data['password'][0].encode()).hexdigest()
+        for uid, u in users.items():
+            if u['email'] == email and u['password'] == password:
+                sid = hashlib.sha256(os.urandom(32)).hexdigest()
+                sessions[sid] = (int(uid), u['username'], u['email'])
+                self.send_response(302)
+                self.send_header('Set-Cookie', f'session={sid}; Path=/')
+                self.send_header('Location', '/')
+                self.end_headers()
+                return
+        self.redirect('/login')
     
     def logout(self):
         self.send_response(302)
@@ -212,20 +153,26 @@ class Handler(BaseHTTPRequestHandler):
         if not user: return
         content = data.get('content', [''])[0]
         image = data.get('image', [''])[0]
-        create_post(user[0], content, image)
+        posts.append({'id': len(posts)+1, 'user_id': user[0], 'content': content, 'image': image, 'date': datetime.now().strftime('%d.%m.%Y %H:%M')})
         self.redirect('/')
     
     def like(self, data):
         user = self.get_user()
         if not user: return
-        like_post(user[0], int(data['post_id'][0]))
+        post_id = int(data['post_id'][0])
+        existing = [l for l in likes if l['user_id'] == user[0] and l['post_id'] == post_id]
+        if existing:
+            likes.remove(existing[0])
+        else:
+            likes.append({'user_id': user[0], 'post_id': post_id})
         self.send_json()
     
     def send_message(self, data):
         user = self.get_user()
         if not user: return
-        to, text = int(data['to'][0]), data['text'][0]
-        send_message(user[0], to, text)
+        to = int(data['to'][0])
+        text = data['text'][0]
+        messages.append({'from_id': user[0], 'to_id': to, 'text': text, 'date': datetime.now().strftime('%d.%m.%Y %H:%M')})
         self.send_json()
     
     def send(self, html):
