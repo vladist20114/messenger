@@ -7,7 +7,7 @@ from datetime import datetime
 
 # ========== ТВОИ ДАННЫЕ ОТ SUPABASE (ПРОВЕРЬ ПРАВИЛЬНОСТЬ!) ==========
 SUPABASE_URL = "https://soylynqasbgifasmzlf.supabase.co"
-SUPABASE_KEY = "sb_publishable_6MR2TYIq1LGB1MYwRMZJ_A_n5Z4eLhU"
+SUPABASE_KEY = "sb_publishable_6MR2TYItq1LGB1MYwRMZjA_n5Z4eLhU"
 
 def supabase_request(endpoint, method="GET", data=None):
     url = f"{SUPABASE_URL}/rest/v1/{endpoint}"
