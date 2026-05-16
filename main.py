@@ -5,6 +5,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from datetime import datetime
 
+# ========== ТВОИ ДАННЫЕ ОТ SUPABASE (ПРОВЕРЬ ПРАВИЛЬНОСТЬ!) ==========
 SUPABASE_URL = "https://soylynqasbgifasmzlf.supabase.co"
 SUPABASE_KEY = "sb_publishable_6MR2TYIq1LGB1MYwRMZJ_A_n5Z4eLhU"
 
